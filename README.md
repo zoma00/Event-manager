@@ -51,5 +51,6 @@ Folder: / (root)
 
 - No server or Python backend is required for the browser app.
 - Saved events are stored in the browser's local storage.
+- Export downloads a plain `.txt` file for easier use on mobile.
 - Events saved on Ubuntu and events saved on a phone are separate.
 - Avoid committing private event notes to a public repository.

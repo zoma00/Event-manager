@@ -4,6 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Cairo Event Time Manager</title>
+  <link rel="icon" href="favicon.ico" sizes="any">
+  <link rel="shortcut icon" href="favicon.ico">
   <style>
     :root {
       color-scheme: dark;
@@ -512,7 +514,7 @@
           <div class="panel-header">
             <h2>Saved Events</h2>
             <div class="actions">
-              <button class="btn btn-plain" id="exportBtn" type="button">Export</button>
+              <button class="btn btn-plain" id="exportBtn" type="button">Export Text</button>
               <button class="btn btn-danger" id="clearSavedBtn" type="button">Clear</button>
             </div>
           </div>
@@ -1128,6 +1130,41 @@ Link visible for attendees`;
       els.savedList.innerHTML = visible.map(renderEventCard).join("");
     }
 
+    function formatEventForText(event, index) {
+      const sourceEnd = event.sourceEnd ? ` - ${event.sourceEnd}` : "";
+      const cairoEnd = event.cairoEnd ? ` - ${event.cairoEnd}` : "";
+      return [
+        `Event ${index + 1}: ${event.name}`,
+        `Type: ${event.eventType}`,
+        `Source timezone: ${event.sourceZoneLabel}`,
+        event.sourceLocation ? `Source assertion: ${event.sourceLocation}` : "",
+        `Source: ${event.sourceStart}${sourceEnd}`,
+        `Source offset: ${event.sourceOffset}`,
+        `Cairo: ${event.cairoStart}${cairoEnd}`,
+        `Cairo offset: ${event.cairoOffset}`,
+        offsetMessage(event.difference),
+        `Alexa reminder: ${event.alexa}`
+      ].filter(Boolean).join("\n");
+    }
+
+    function formatEventsForText(events) {
+      const created = new Date().toLocaleString("en-US", {
+        timeZone: CAIRO_TZ,
+        year: "numeric",
+        month: "long",
+        day: "2-digit",
+        hour: "numeric",
+        minute: "2-digit",
+        hour12: true
+      });
+      return [
+        "Cairo Event Times",
+        `Exported: ${created} Cairo time`,
+        "",
+        events.map((event, index) => formatEventForText(event, index)).join("\n\n")
+      ].join("\n");
+    }
+
     function runConversion(shouldSave) {
       clearMessage();
       try {
@@ -1157,11 +1194,11 @@ Link visible for attendees`;
         setMessage("Nothing to export. Convert and save an event first.", "warn");
         return;
       }
-      const blob = new Blob([JSON.stringify(exportEvents, null, 2)], { type: "application/json" });
+      const blob = new Blob([formatEventsForText(exportEvents)], { type: "text/plain;charset=utf-8" });
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      link.download = `cairo_event_times_${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "")}.json`;
+      link.download = `cairo_event_times_${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "")}.txt`;
       link.click();
       URL.revokeObjectURL(url);
       setMessage(`Exported ${exportEvents.length} event(s).`, "");
