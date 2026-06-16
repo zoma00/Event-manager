@@ -1,0 +1,1203 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Cairo Event Time Manager</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #07090c;
+      --surface: #11151b;
+      --surface-2: #171c24;
+      --surface-3: #0d1117;
+      --line: #2a323d;
+      --text: #eef3f7;
+      --muted: #9aa7b4;
+      --accent: #36c59a;
+      --accent-dark: #22a77f;
+      --warn: #f0aa45;
+      --danger: #d65a55;
+      --focus: rgba(54, 197, 154, 0.22);
+      --shadow: 0 18px 44px rgba(0, 0, 0, 0.42);
+      --input: #0b0f15;
+      --badge: #1a2029;
+      --notice: #141a22;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      letter-spacing: 0;
+    }
+
+    button,
+    input,
+    textarea,
+    select {
+      font: inherit;
+    }
+
+    button {
+      border: 0;
+      cursor: pointer;
+    }
+
+    .shell {
+      min-height: 100vh;
+      display: grid;
+      grid-template-rows: auto 1fr;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 14px clamp(16px, 4vw, 34px);
+      border-bottom: 1px solid var(--line);
+      background: rgba(7, 9, 12, 0.9);
+      backdrop-filter: blur(12px);
+      position: sticky;
+      top: 0;
+      z-index: 5;
+    }
+
+    .brand {
+      min-width: 0;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .brand img {
+      width: 46px;
+      height: 46px;
+      object-fit: cover;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+      background: var(--surface-2);
+    }
+
+    .brand h1 {
+      margin: 0;
+      font-size: clamp(18px, 3vw, 24px);
+      font-weight: 750;
+      line-height: 1.1;
+    }
+
+    .status {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 34px;
+      padding: 6px 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--surface-2);
+      color: var(--muted);
+      font-size: 13px;
+      white-space: nowrap;
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--accent);
+    }
+
+    .app {
+      width: min(1440px, 100%);
+      margin: 0 auto;
+      padding: 20px clamp(14px, 3vw, 34px) 34px;
+      display: grid;
+      grid-template-columns: minmax(320px, 0.9fr) minmax(420px, 1.1fr);
+      gap: 18px;
+      align-items: start;
+    }
+
+    .panel {
+      min-width: 0;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .panel-header {
+      min-height: 56px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--line);
+      background: var(--surface-2);
+    }
+
+    .panel-header h2 {
+      margin: 0;
+      font-size: 16px;
+      font-weight: 720;
+    }
+
+    .panel-body {
+      padding: 16px;
+    }
+
+    .form-grid {
+      display: grid;
+      gap: 14px;
+    }
+
+    .field {
+      display: grid;
+      gap: 7px;
+    }
+
+    label {
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 680;
+    }
+
+    textarea,
+    input,
+    select {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--input);
+      color: var(--text);
+      outline: none;
+    }
+
+    textarea:focus,
+    input:focus,
+    select:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 4px var(--focus);
+    }
+
+    textarea {
+      min-height: 280px;
+      resize: vertical;
+      padding: 12px;
+      line-height: 1.45;
+    }
+
+    input,
+    select {
+      height: 42px;
+      padding: 0 11px;
+    }
+
+    .inline-grid {
+      display: grid;
+      grid-template-columns: 1.4fr 0.8fr;
+      gap: 12px;
+    }
+
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      padding-top: 2px;
+    }
+
+    .btn {
+      min-height: 42px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 0 14px;
+      border-radius: 8px;
+      font-weight: 730;
+      white-space: nowrap;
+    }
+
+    .btn-primary {
+      background: var(--accent);
+      color: #04110d;
+    }
+
+    .btn-primary:hover {
+      background: var(--accent-dark);
+    }
+
+    .btn-plain {
+      color: var(--text);
+      background: var(--surface-2);
+      border: 1px solid var(--line);
+    }
+
+    .btn-danger {
+      color: white;
+      background: var(--danger);
+    }
+
+    .notice {
+      min-height: 44px;
+      display: none;
+      align-items: flex-start;
+      gap: 10px;
+      padding: 10px 12px;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+      background: var(--notice);
+      color: var(--muted);
+      line-height: 1.35;
+      font-size: 14px;
+    }
+
+    .notice.visible {
+      display: flex;
+    }
+
+    .notice.warn {
+      border-color: #8c6931;
+      background: #21180c;
+      color: #f0c985;
+    }
+
+    .notice.error {
+      border-color: #8a3935;
+      background: #261010;
+      color: #f0aaa6;
+    }
+
+    .results {
+      display: grid;
+      gap: 12px;
+    }
+
+    .event-card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--surface-2);
+      padding: 14px;
+      display: grid;
+      gap: 10px;
+    }
+
+    .event-card header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 12px;
+    }
+
+    .event-card h3 {
+      margin: 0;
+      font-size: 15px;
+      line-height: 1.25;
+    }
+
+    .badge-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px;
+    }
+
+    .badge {
+      min-height: 26px;
+      display: inline-flex;
+      align-items: center;
+      padding: 3px 8px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: var(--badge);
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .badge.online {
+      background: #0d2d26;
+      color: #7be2be;
+      border-color: #235d4f;
+    }
+
+    .badge.inperson {
+      background: #2d2110;
+      color: #f2c276;
+      border-color: #74572a;
+    }
+
+    .time-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+
+    .time-box {
+      min-width: 0;
+      padding: 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--surface-3);
+    }
+
+    .time-box b {
+      display: block;
+      margin-bottom: 5px;
+      font-size: 12px;
+      color: var(--muted);
+      text-transform: uppercase;
+    }
+
+    .time-box span {
+      display: block;
+      line-height: 1.35;
+      overflow-wrap: anywhere;
+    }
+
+    .meta {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.4;
+    }
+
+    .tabs {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    .tab {
+      min-height: 34px;
+      padding: 0 10px;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+      background: var(--surface-2);
+      color: var(--muted);
+      font-weight: 720;
+      font-size: 13px;
+    }
+
+    .tab.active {
+      color: white;
+      background: var(--accent);
+      border-color: var(--accent);
+    }
+
+    .saved-list {
+      display: grid;
+      gap: 10px;
+      max-height: 58vh;
+      overflow: auto;
+      padding-right: 4px;
+    }
+
+    .empty {
+      padding: 28px 14px;
+      text-align: center;
+      color: var(--muted);
+      border: 1px dashed var(--line);
+      border-radius: 8px;
+      background: var(--surface-3);
+    }
+
+    .mobile-stack {
+      display: grid;
+      gap: 18px;
+    }
+
+    @media (max-width: 980px) {
+      .app {
+        grid-template-columns: 1fr;
+      }
+
+      .saved-list {
+        max-height: none;
+      }
+    }
+
+    @media (max-width: 640px) {
+      .topbar {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+
+      .status {
+        width: 100%;
+        justify-content: flex-start;
+      }
+
+      .inline-grid,
+      .time-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .btn {
+        flex: 1 1 auto;
+      }
+
+      textarea {
+        min-height: 230px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header class="topbar">
+      <div class="brand">
+        <img src="../assets/world-time-zone-concept-timezone.jpg" alt="">
+        <h1>Cairo Event Time Manager</h1>
+      </div>
+      <div class="status" id="storageStatus">
+        <span class="status-dot"></span>
+        <span>Browser storage ready</span>
+      </div>
+    </header>
+
+    <main class="app">
+      <section class="panel">
+        <div class="panel-header">
+          <h2>Convert Event Text</h2>
+        </div>
+        <div class="panel-body">
+          <div class="form-grid">
+            <div class="field">
+              <label for="eventText">Event text</label>
+              <textarea id="eventText" spellcheck="false" placeholder="Paste event text here"></textarea>
+            </div>
+
+            <div class="inline-grid">
+              <div class="field">
+                <label for="sourceLocation">Host/timezone override</label>
+                <input id="sourceLocation" placeholder="Leave blank for event GMT, or type Washington, DC">
+              </div>
+              <div class="field">
+                <label for="defaultYear">Default year</label>
+                <input id="defaultYear" type="number" min="2000" max="2100">
+              </div>
+            </div>
+
+            <div class="actions">
+              <button class="btn btn-primary" id="convertBtn" type="button">Convert and Save</button>
+              <button class="btn btn-plain" id="previewBtn" type="button">Preview Only</button>
+              <button class="btn btn-plain" id="sampleBtn" type="button">Load Sample</button>
+              <button class="btn btn-plain" id="clearInputBtn" type="button">Clear Text</button>
+            </div>
+
+            <div class="notice" id="messageBox"></div>
+          </div>
+        </div>
+      </section>
+
+      <div class="mobile-stack">
+        <section class="panel">
+          <div class="panel-header">
+            <h2>Converted Events</h2>
+          </div>
+          <div class="panel-body">
+            <div class="results" id="results">
+              <div class="empty">No conversion yet.</div>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-header">
+            <h2>Saved Events</h2>
+            <div class="actions">
+              <button class="btn btn-plain" id="exportBtn" type="button">Export</button>
+              <button class="btn btn-danger" id="clearSavedBtn" type="button">Clear</button>
+            </div>
+          </div>
+          <div class="panel-body">
+            <div class="tabs" id="tabs">
+              <button class="tab active" data-filter="all" type="button">All</button>
+              <button class="tab" data-filter="online" type="button">Online</button>
+              <button class="tab" data-filter="inperson" type="button">In person</button>
+              <button class="tab" data-filter="unknown" type="button">Unclear</button>
+            </div>
+            <div style="height: 12px"></div>
+            <div class="saved-list" id="savedList"></div>
+          </div>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    const CAIRO_TZ = "Africa/Cairo";
+    const STORAGE_KEY = "cairo-event-manager.saved-events.v1";
+    const DEFAULT_SAMPLE = `Meeting Name: Woman Healing After Narcissistic Abuse
+Thursday, Jun 25 · 2:00 AM to 2:40 AM EEST
+Location: London
+
+Linkedin Tips for Job Seekers: Advice from a Tech Recruiter
+
+calendar icon
+Saturday, Jun 27 · 6:00 PM to 8:00 PM EEST
+
+video icon
+Online event
+
+Link visible for attendees`;
+
+    const monthMap = {
+      jan: 1, january: 1, feb: 2, february: 2, mar: 3, march: 3,
+      apr: 4, april: 4, may: 5, jun: 6, june: 6, jul: 7, july: 7,
+      aug: 8, august: 8, sep: 9, sept: 9, september: 9,
+      oct: 10, october: 10, nov: 11, november: 11, dec: 12, december: 12
+    };
+
+    const fixedZones = {
+      UTC: 0, GMT: 0, Z: 0, EET: 120, EEST: 180, AEST: 600, AEDT: 660,
+      AWST: 480, ACST: 570, ACDT: 630, PST: -480, PDT: -420,
+      MST: -420, MDT: -360, CST: -360, CDT: -300, EST: -300,
+      EDT: -240, BST: 60, CET: 60, CEST: 120, GST: 240
+    };
+
+    const locationZones = {
+      "london": "Europe/London",
+      "uk": "Europe/London",
+      "united kingdom": "Europe/London",
+      "amsterdam": "Europe/Amsterdam",
+      "netherlands": "Europe/Amsterdam",
+      "holland": "Europe/Amsterdam",
+      "portland or": "America/Los_Angeles",
+      "portland, or": "America/Los_Angeles",
+      "portland oregon": "America/Los_Angeles",
+      "oregon": "America/Los_Angeles",
+      "los angeles": "America/Los_Angeles",
+      "new york": "America/New_York",
+      "washington": "America/New_York",
+      "washington dc": "America/New_York",
+      "washington, dc": "America/New_York",
+      "dc": "America/New_York",
+      "sydney": "Australia/Sydney",
+      "dubai": "Asia/Dubai",
+      "cairo": "Africa/Cairo",
+      "egypt": "Africa/Cairo"
+    };
+
+    const weekdayMap = {
+      mon: 1, monday: 1, tue: 2, tues: 2, tuesday: 2, tuseday: 2, tusday: 2,
+      wed: 3, wednesday: 3, thu: 4, thur: 4, thurs: 4, thursday: 4,
+      fri: 5, friday: 5, sat: 6, saturday: 6, sun: 0, sunday: 0
+    };
+
+    const state = {
+      filter: "all",
+      lastConverted: []
+    };
+
+    const els = {
+      eventText: document.getElementById("eventText"),
+      sourceLocation: document.getElementById("sourceLocation"),
+      defaultYear: document.getElementById("defaultYear"),
+      convertBtn: document.getElementById("convertBtn"),
+      previewBtn: document.getElementById("previewBtn"),
+      sampleBtn: document.getElementById("sampleBtn"),
+      clearInputBtn: document.getElementById("clearInputBtn"),
+      messageBox: document.getElementById("messageBox"),
+      results: document.getElementById("results"),
+      savedList: document.getElementById("savedList"),
+      exportBtn: document.getElementById("exportBtn"),
+      clearSavedBtn: document.getElementById("clearSavedBtn"),
+      tabs: document.getElementById("tabs")
+    };
+
+    els.defaultYear.value = new Date().getFullYear();
+
+    function normalizeText(text) {
+      return text
+        .replace(/\u2013|\u2014|\u2212/g, "-")
+        .replace(/\u2022|\u00b7/g, " ")
+        .replace(/\u00a0|\u202f/g, " ")
+        .replace(/\s*\/\s*/g, "/")
+        .replace(/[ \t]+/g, " ")
+        .trim();
+    }
+
+    function setMessage(text, type = "") {
+      els.messageBox.className = `notice visible ${type}`.trim();
+      els.messageBox.textContent = text;
+    }
+
+    function clearMessage() {
+      els.messageBox.className = "notice";
+      els.messageBox.textContent = "";
+    }
+
+    function cleanLocationKey(value) {
+      return value.trim().toLowerCase().replace(/\./g, "").replace(/\s+/g, " ");
+    }
+
+    function isIanaTimeZone(value) {
+      try {
+        new Intl.DateTimeFormat("en-US", { timeZone: value }).format(new Date());
+        return true;
+      } catch {
+        return false;
+      }
+    }
+
+    function resolveSourceZone(value) {
+      if (!value) return null;
+      const trimmed = value.trim();
+      if (isIanaTimeZone(trimmed)) {
+        return { label: trimmed, timeZone: trimmed, fixedOffset: null, location: trimmed };
+      }
+      const compactOffset = trimmed.replace(/\s+/g, "");
+      const offsetMatch = compactOffset.match(/^(UTC|GMT)([+-])(\d{1,2})(?::?(\d{2}))?$/i);
+      if (offsetMatch) {
+        const sign = offsetMatch[2] === "+" ? 1 : -1;
+        const minutes = sign * (Number(offsetMatch[3]) * 60 + Number(offsetMatch[4] || 0));
+        return { label: compactOffset.toUpperCase(), timeZone: null, fixedOffset: minutes, location: trimmed };
+      }
+      const fixed = fixedZones[trimmed.toUpperCase()];
+      if (fixed !== undefined) {
+        return { label: trimmed.toUpperCase(), timeZone: null, fixedOffset: fixed, location: trimmed };
+      }
+      const key = cleanLocationKey(trimmed);
+      const noComma = key.replace(/,/g, "");
+      const matchKey = locationZones[key] ? key : Object.keys(locationZones).find((candidate) => key.includes(candidate) || noComma.includes(candidate));
+      if (matchKey) {
+        return { label: locationZones[matchKey], timeZone: locationZones[matchKey], fixedOffset: null, location: trimmed };
+      }
+      return null;
+    }
+
+    function canonicalGmtOffset(value) {
+      const match = value.trim().match(/^\(?(UTC|GMT)\s*([+-])\s*(\d{1,2})(?::?(\d{2}))?\)?$/i);
+      if (!match) return "";
+      return `${match[1].toUpperCase()}${match[2]}${String(Number(match[3])).padStart(2, "0")}:${String(Number(match[4] || 0)).padStart(2, "0")}`;
+    }
+
+    function extractExplicitGmtZone(text) {
+      const match = text.match(/\(?(?:UTC|GMT)\s*[+-]\s*\d{1,2}(?::?\d{2})?\)?/i);
+      return match ? canonicalGmtOffset(match[0]) : "";
+    }
+
+    function extractLocation(text) {
+      const lines = text.split(/\r?\n/).map((line) => line.trim());
+      for (const line of lines) {
+        const match = line.match(/^(?:source\s+)?(?:location|venue|address|city|place)\s*:\s*(.+)$/i);
+        if (match) return match[1].trim();
+      }
+      for (let index = 0; index < lines.length; index += 1) {
+        if (/^(pin|location|map)\s+icon$/i.test(lines[index])) {
+          for (const candidate of lines.slice(index + 1)) {
+            if (candidate && !isMetadataLine(candidate) && !lineHasTime(candidate)) return candidate;
+          }
+        }
+      }
+      const cityState = lines.find((line) => /\b[A-Za-z .'-]+,\s*[A-Z]{2}\b/.test(line));
+      return cityState || "";
+    }
+
+    function isMetadataLine(line) {
+      return /\b(calendar|time|video|location|map|pin)\s+icon\b/i.test(line) || /^link visible for attendees$/i.test(line);
+    }
+
+    function inferEventType(text) {
+      const value = normalizeText(text).toLowerCase();
+      if (/\b(online event|virtual event|webinar|zoom|teams|google meet|video icon|link visible for attendees|livestream|live stream)\b/.test(value)) {
+        return "online";
+      }
+      if (/\b(in-person|in person|venue|address|location|room|building|street|avenue|road|floor|map|postcode|zip code)\b/.test(value)) {
+        return "inperson";
+      }
+      return "unknown";
+    }
+
+    function followingType(lines, index) {
+      const parts = [];
+      for (const line of lines.slice(index + 1)) {
+        const stripped = line.trim();
+        if (!stripped) continue;
+        if (lineHasTime(stripped)) break;
+        if (extractMeetingName(stripped) || stripped.endsWith(":")) break;
+        parts.push(stripped);
+      }
+      return inferEventType(parts.join("\n"));
+    }
+
+    function extractMeetingName(line) {
+      const match = line.match(/^(meeting|event)\s+name\s*:\s*(.+)$/i);
+      return match ? match[2].trim() : "";
+    }
+
+    function lineHasTime(line) {
+      return Boolean(parseTimeRange(line) || parseSingleTime(line));
+    }
+
+    function firstUsefulTitleLine(text) {
+      const ignored = /^(close|all day|does not repeat|guests|add guests|guest permissions|modify event|invite others|event end time zone)$/i;
+      for (const raw of text.split(/\r?\n/)) {
+        const line = raw.trim();
+        if (!line || isMetadataLine(line) || ignored.test(line) || line.toLowerCase().includes("event end time zone")) continue;
+        if (/^(?:to|-)$/.test(line) || /^\d{1,2}(?::\d{2})?\s*(?:AM|PM)?$/i.test(line)) continue;
+        if (lineHasTime(line) || parseDateQuiet(line) || extractExplicitGmtZone(line)) continue;
+        return line.replace(/:$/, "");
+      }
+      return "";
+    }
+
+    function parseDate(text, defaultYear) {
+      const clean = normalizeText(text);
+      let match = clean.match(/\b(\d{4})-(\d{1,2})-(\d{1,2})\b/);
+      if (match) return { year: Number(match[1]), month: Number(match[2]), day: Number(match[3]) };
+
+      match = clean.match(/\b(\d{1,2})\/(\d{1,2})\/(\d{4})\b/);
+      if (match) return { year: Number(match[3]), month: Number(match[2]), day: Number(match[1]) };
+
+      match = clean.match(/\b(?:mon(?:day)?|tue(?:s|sday|day)?|tuseday|wed(?:nesday)?|thu(?:r|rs|rsday|rday|sday)?|thursday|fri(?:day)?|sat(?:urday)?|sun(?:day)?)?,?\s*(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]+)(?:,?\s*(\d{4}))?\b/i);
+      if (match && monthMap[match[2].toLowerCase()]) {
+        return { year: Number(match[3] || defaultYear), month: monthMap[match[2].toLowerCase()], day: Number(match[1]) };
+      }
+
+      match = clean.match(/\b(?:mon(?:day)?|tue(?:s|sday|day)?|tuseday|wed(?:nesday)?|thu(?:r|rs|rsday|rday|sday)?|thursday|fri(?:day)?|sat(?:urday)?|sun(?:day)?)?,?\s*([A-Za-z]+)\s+(\d{1,2})(?:st|nd|rd|th)?(?:,?\s*(\d{4}))?\b/i);
+      if (match && monthMap[match[1].toLowerCase()]) {
+        return { year: Number(match[3] || defaultYear), month: monthMap[match[1].toLowerCase()], day: Number(match[2]) };
+      }
+
+      match = clean.match(/^\s*(\d{1,2})\s+(\d{1,2})(?:\s+(\d{4}))?\b/);
+      if (match) return { year: Number(match[3] || defaultYear), month: Number(match[2]), day: Number(match[1]) };
+
+      match = clean.match(/\b(mon(?:day)?|tue(?:s|sday|day)?|tuseday|wed(?:nesday)?|thu(?:r|rs|rsday|rday|sday)?|thursday|fri(?:day)?|sat(?:urday)?|sun(?:day)?)\b/i);
+      if (match) {
+        const today = new Date();
+        const base = new Date(defaultYear, today.getMonth(), today.getDate());
+        const targetDay = weekdayMap[match[1].toLowerCase()];
+        const days = (targetDay - base.getDay() + 7) % 7;
+        base.setDate(base.getDate() + days);
+        return { year: base.getFullYear(), month: base.getMonth() + 1, day: base.getDate() };
+      }
+
+      throw new Error("Could not find a date.");
+    }
+
+    function parseDateQuiet(text) {
+      try {
+        parseDate(text, Number(els.defaultYear.value || new Date().getFullYear()));
+        return true;
+      } catch {
+        return false;
+      }
+    }
+
+    function parseTimeRange(text) {
+      const clean = normalizeText(text);
+      const match = clean.match(/(?<![\d-])(\d{1,2})(?::(\d{2}))?\s*(AM|PM)?\s*(?:-|to)\s*(\d{1,2})(?::(\d{2}))?\s*(AM|PM)?(?:\s*\(?([A-Za-z_]+\/[A-Za-z_]+|(?:UTC|GMT)\s*[+-]\s*\d{1,2}(?::?\d{2})?|[A-Z]{1,5})\)?)?(?=$|\s|[.,;:!?])/i);
+      if (!match) return null;
+      return {
+        startHour: match[1],
+        startMinute: match[2] || "0",
+        startAmpm: match[3] || match[6] || "",
+        endHour: match[4],
+        endMinute: match[5] || "0",
+        endAmpm: match[6] || "",
+        zoneLabel: match[7] || ""
+      };
+    }
+
+    function parseSingleTime(text) {
+      const match = normalizeText(text).match(/\bat\s+(\d{1,2})(?::(\d{2}))?\s*(AM|PM)?(?:\s*\(?([A-Za-z_]+\/[A-Za-z_]+|[A-Z]{1,5}(?:\/[A-Z]{1,5})?|(?:UTC|GMT)\s*[+-]\s*\d{1,2}(?::?\d{2})?)\)?)?/i);
+      if (!match) return null;
+      return {
+        startHour: match[1],
+        startMinute: match[2] || "0",
+        startAmpm: match[3] || "",
+        endHour: match[1],
+        endMinute: match[2] || "0",
+        endAmpm: match[3] || "",
+        zoneLabel: match[4] || "",
+        single: true
+      };
+    }
+
+    function parseHour(hourText, minuteText, ampm) {
+      let hour = Number(hourText);
+      const minute = Number(minuteText || 0);
+      const suffix = (ampm || "").toUpperCase();
+      if (suffix) {
+        if (hour === 12) hour = 0;
+        if (suffix === "PM") hour += 12;
+      }
+      return { hour, minute };
+    }
+
+    function fixedOffsetFromLabel(label) {
+      if (!label) return null;
+      const compact = label.replace(/\s+/g, "").toUpperCase();
+      const offset = compact.match(/^(UTC|GMT)([+-])(\d{1,2})(?::?(\d{2}))?$/);
+      if (offset) {
+        const sign = offset[2] === "+" ? 1 : -1;
+        return { label: compact, minutes: sign * (Number(offset[3]) * 60 + Number(offset[4] || 0)) };
+      }
+      if (fixedZones[compact] !== undefined) return { label: compact, minutes: fixedZones[compact] };
+      return null;
+    }
+
+    function sourceZoneFromMatchedLabel(label) {
+      if (!label) return null;
+      if (isIanaTimeZone(label)) return { label, timeZone: label, fixedOffset: null, location: "" };
+      const fixed = fixedOffsetFromLabel(label);
+      if (fixed) return { label: fixed.label, timeZone: null, fixedOffset: fixed.minutes, location: "" };
+      const first = label.split("/")[0];
+      const fixedFirst = fixedOffsetFromLabel(first);
+      if (fixedFirst) return { label: fixedFirst.label, timeZone: null, fixedOffset: fixedFirst.minutes, location: "" };
+      return null;
+    }
+
+    function getParts(date, timeZone) {
+      const formatter = new Intl.DateTimeFormat("en-US", {
+        timeZone,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        hourCycle: "h23"
+      });
+      const parts = Object.fromEntries(formatter.formatToParts(date).filter((part) => part.type !== "literal").map((part) => [part.type, Number(part.value)]));
+      return { year: parts.year, month: parts.month, day: parts.day, hour: parts.hour, minute: parts.minute };
+    }
+
+    function getOffsetMinutes(timeZone, date) {
+      const parts = getParts(date, timeZone);
+      const asUtc = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute);
+      return Math.round((asUtc - date.getTime()) / 60000);
+    }
+
+    function zonedTimeToUtc(dateParts, timeParts, zone) {
+      if (zone.fixedOffset !== null) {
+        return new Date(Date.UTC(dateParts.year, dateParts.month - 1, dateParts.day, timeParts.hour, timeParts.minute) - zone.fixedOffset * 60000);
+      }
+      let guess = Date.UTC(dateParts.year, dateParts.month - 1, dateParts.day, timeParts.hour, timeParts.minute);
+      for (let index = 0; index < 4; index += 1) {
+        const offset = getOffsetMinutes(zone.timeZone, new Date(guess));
+        const next = Date.UTC(dateParts.year, dateParts.month - 1, dateParts.day, timeParts.hour, timeParts.minute) - offset * 60000;
+        if (Math.abs(next - guess) < 60000) return new Date(next);
+        guess = next;
+      }
+      return new Date(guess);
+    }
+
+    function formatInZone(date, timeZone) {
+      return new Intl.DateTimeFormat("en-US", {
+        timeZone,
+        weekday: "long",
+        year: "numeric",
+        month: "long",
+        day: "2-digit",
+        hour: "numeric",
+        minute: "2-digit",
+        hour12: true
+      }).format(date).replace(",", "");
+    }
+
+    function formatFixedOffset(date, offsetMinutes) {
+      return formatInZone(new Date(date.getTime() + offsetMinutes * 60000), "UTC");
+    }
+
+    function formatSourceDate(date, zone) {
+      if (zone.fixedOffset !== null) return formatFixedOffset(date, zone.fixedOffset);
+      return formatInZone(date, zone.timeZone);
+    }
+
+    function formatOffset(minutes) {
+      const sign = minutes >= 0 ? "+" : "-";
+      const abs = Math.abs(minutes);
+      const hours = Math.floor(abs / 60);
+      const mins = abs % 60;
+      return mins ? `UTC${sign}${hours}:${String(mins).padStart(2, "0")}` : `UTC${sign}${hours}`;
+    }
+
+    function eventSegments(text) {
+      const lines = text.split(/\r?\n/);
+      const segments = [];
+      let pendingName = "";
+      let pendingLabel = "";
+
+      lines.forEach((raw, index) => {
+        const line = raw.trim();
+        if (!line || isMetadataLine(line)) return;
+        const explicitName = extractMeetingName(line);
+        if (explicitName) {
+          pendingName = explicitName;
+          return;
+        }
+        if (line.endsWith(":")) {
+          pendingLabel = line.slice(0, -1).trim();
+          return;
+        }
+        if (lineHasTime(line)) {
+          segments.push({
+            label: pendingLabel,
+            name: pendingName,
+            line,
+            eventType: followingType(lines, index)
+          });
+          pendingLabel = "";
+          pendingName = "";
+          return;
+        }
+        if (/[A-Za-z]/.test(line)) pendingName = line;
+      });
+
+      if (!segments.length && lineHasTime(text)) {
+        segments.push({
+          label: "",
+          name: firstUsefulTitleLine(text),
+          line: normalizeText(text),
+          eventType: inferEventType(text)
+        });
+      }
+
+      return segments;
+    }
+
+    function convertText(text, options) {
+      const defaultYear = Number(options.defaultYear || new Date().getFullYear());
+      const detectedLocation = extractLocation(text);
+      const explicitGmtZone = extractExplicitGmtZone(text);
+      const assertedText = options.sourceLocation || explicitGmtZone || detectedLocation;
+      const assertedZone = resolveSourceZone(assertedText);
+      const segments = eventSegments(text);
+      if (!segments.length) throw new Error("No event time found.");
+
+      return segments.map((segment, index) => {
+        const dateParts = parseDate(segment.line, defaultYear);
+        const parsedTime = parseTimeRange(segment.line) || parseSingleTime(segment.line);
+        const startTime = parseHour(parsedTime.startHour, parsedTime.startMinute, parsedTime.startAmpm);
+        const endTime = parseHour(parsedTime.endHour, parsedTime.endMinute, parsedTime.endAmpm || parsedTime.startAmpm);
+        const previewZone = assertedZone || sourceZoneFromMatchedLabel(parsedTime.zoneLabel);
+        if (!previewZone) throw new Error("Source location/timezone assertion is required.");
+
+        const startUtc = zonedTimeToUtc(dateParts, startTime, previewZone);
+        let endUtc = zonedTimeToUtc(dateParts, endTime, previewZone);
+        if (!parsedTime.single && endUtc <= startUtc) {
+          const nextDate = new Date(Date.UTC(dateParts.year, dateParts.month - 1, dateParts.day + 1));
+          endUtc = zonedTimeToUtc({ year: nextDate.getUTCFullYear(), month: nextDate.getUTCMonth() + 1, day: nextDate.getUTCDate() }, endTime, previewZone);
+        }
+        const sourceOffset = previewZone.fixedOffset !== null ? previewZone.fixedOffset : getOffsetMinutes(previewZone.timeZone, startUtc);
+        const cairoOffset = getOffsetMinutes(CAIRO_TZ, startUtc);
+        return {
+          id: "",
+          index: index + 1,
+          name: segment.name || `Event ${index + 1}`,
+          sourceLocation: assertedText || "",
+          sourceZoneLabel: previewZone.label,
+          eventType: segment.eventType,
+          sourceStart: formatSourceDate(startUtc, previewZone),
+          sourceEnd: parsedTime.single ? "" : formatSourceDate(endUtc, previewZone),
+          cairoStart: formatInZone(startUtc, CAIRO_TZ),
+          cairoEnd: parsedTime.single ? "" : formatInZone(endUtc, CAIRO_TZ),
+          alexa: `${formatInZone(startUtc, CAIRO_TZ).split(" at ")[0]} at ${new Intl.DateTimeFormat("en-US", { timeZone: CAIRO_TZ, hour: "numeric", minute: "2-digit", hour12: true }).format(startUtc)} Cairo time`,
+          sourceOffset: formatOffset(sourceOffset),
+          cairoOffset: formatOffset(cairoOffset),
+          difference: cairoOffset - sourceOffset,
+          originalLine: segment.line,
+          savedAt: new Date().toISOString()
+        };
+      }).map((event) => ({ ...event, id: fingerprint(event) }));
+    }
+
+    function fingerprint(event) {
+      const value = [
+        event.name,
+        event.sourceLocation,
+        event.sourceZoneLabel,
+        event.eventType,
+        event.sourceStart,
+        event.sourceEnd,
+        event.cairoStart,
+        event.cairoEnd
+      ].join("\u001f");
+      let hash = 0;
+      for (let index = 0; index < value.length; index += 1) {
+        hash = Math.imul(31, hash) + value.charCodeAt(index) | 0;
+      }
+      return Math.abs(hash).toString(16);
+    }
+
+    function offsetMessage(minutes) {
+      if (minutes === 0) return "No time change; Cairo has the same UTC offset.";
+      const direction = minutes > 0 ? "ahead of" : "behind";
+      const abs = Math.abs(minutes);
+      const hours = Math.floor(abs / 60);
+      const mins = abs % 60;
+      const amount = mins ? `${hours}h ${mins}m` : `${hours}h`;
+      return `Cairo is ${amount} ${direction} source time.`;
+    }
+
+    function eventBadgeClass(type) {
+      if (type === "online") return "badge online";
+      if (type === "inperson") return "badge inperson";
+      return "badge";
+    }
+
+    function renderEventCard(event) {
+      const sourceEnd = event.sourceEnd ? ` - ${event.sourceEnd}` : "";
+      const cairoEnd = event.cairoEnd ? ` - ${event.cairoEnd}` : "";
+      return `
+        <article class="event-card">
+          <header>
+            <h3>${escapeHtml(event.name)}</h3>
+            <span class="${eventBadgeClass(event.eventType)}">${escapeHtml(event.eventType)}</span>
+          </header>
+          <div class="badge-row">
+            <span class="badge">${escapeHtml(event.sourceZoneLabel)}</span>
+            ${event.sourceLocation ? `<span class="badge">${escapeHtml(event.sourceLocation)}</span>` : ""}
+          </div>
+          <div class="time-grid">
+            <div class="time-box">
+              <b>Source</b>
+              <span>${escapeHtml(event.sourceStart + sourceEnd)}</span>
+              <span class="meta">${escapeHtml(event.sourceOffset)}</span>
+            </div>
+            <div class="time-box">
+              <b>Cairo</b>
+              <span>${escapeHtml(event.cairoStart + cairoEnd)}</span>
+              <span class="meta">${escapeHtml(event.cairoOffset)}</span>
+            </div>
+          </div>
+          <div class="meta">${escapeHtml(offsetMessage(event.difference))}</div>
+          <div class="meta">Alexa reminder: ${escapeHtml(event.alexa)}</div>
+        </article>
+      `;
+    }
+
+    function escapeHtml(value) {
+      return String(value)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+    }
+
+    function readSaved() {
+      try {
+        return JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
+      } catch {
+        return [];
+      }
+    }
+
+    function writeSaved(events) {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(events));
+    }
+
+    function saveEvents(events) {
+      const saved = readSaved();
+      const existing = new Set(saved.map((event) => event.id));
+      const additions = [];
+      events.forEach((event) => {
+        if (!existing.has(event.id)) {
+          additions.push(event);
+          existing.add(event.id);
+        }
+      });
+      writeSaved([...additions, ...saved]);
+      return { savedCount: additions.length, duplicateCount: events.length - additions.length };
+    }
+
+    function renderResults(events) {
+      if (!events.length) {
+        els.results.innerHTML = '<div class="empty">No conversion yet.</div>';
+        return;
+      }
+      els.results.innerHTML = events.map(renderEventCard).join("");
+    }
+
+    function renderSaved() {
+      const saved = readSaved();
+      const visible = state.filter === "all" ? saved : saved.filter((event) => event.eventType === state.filter);
+      if (!visible.length) {
+        els.savedList.innerHTML = '<div class="empty">No saved events in this view.</div>';
+        return;
+      }
+      els.savedList.innerHTML = visible.map(renderEventCard).join("");
+    }
+
+    function runConversion(shouldSave) {
+      clearMessage();
+      try {
+        const events = convertText(els.eventText.value, {
+          defaultYear: els.defaultYear.value,
+          sourceLocation: els.sourceLocation.value.trim()
+        });
+        state.lastConverted = events;
+        renderResults(events);
+        if (!shouldSave) {
+          setMessage("Preview complete. Nothing was saved.", "");
+          return;
+        }
+        const result = saveEvents(events);
+        renderSaved();
+        const duplicateText = result.duplicateCount ? ` ${result.duplicateCount} duplicate event(s) skipped.` : "";
+        setMessage(`${result.savedCount} event(s) saved.${duplicateText}`, result.savedCount ? "" : "warn");
+      } catch (error) {
+        setMessage(error.message, "error");
+      }
+    }
+
+    function downloadSaved() {
+      const saved = readSaved();
+      const exportEvents = saved.length ? saved : state.lastConverted;
+      if (!exportEvents.length) {
+        setMessage("Nothing to export. Convert and save an event first.", "warn");
+        return;
+      }
+      const blob = new Blob([JSON.stringify(exportEvents, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `cairo_event_times_${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "")}.json`;
+      link.click();
+      URL.revokeObjectURL(url);
+      setMessage(`Exported ${exportEvents.length} event(s).`, "");
+    }
+
+    els.convertBtn.addEventListener("click", () => runConversion(true));
+    els.previewBtn.addEventListener("click", () => runConversion(false));
+    els.sampleBtn.addEventListener("click", () => {
+      els.eventText.value = DEFAULT_SAMPLE;
+      clearMessage();
+    });
+    els.clearInputBtn.addEventListener("click", () => {
+      els.eventText.value = "";
+      els.sourceLocation.value = "";
+      state.lastConverted = [];
+      els.results.innerHTML = '<div class="empty">No conversion yet.</div>';
+      clearMessage();
+    });
+    els.exportBtn.addEventListener("click", downloadSaved);
+    els.clearSavedBtn.addEventListener("click", () => {
+      if (!readSaved().length) return;
+      if (confirm("Clear saved browser events?")) {
+        writeSaved([]);
+        renderSaved();
+        setMessage("Saved browser events cleared.", "warn");
+      }
+    });
+    els.tabs.addEventListener("click", (event) => {
+      const button = event.target.closest(".tab");
+      if (!button) return;
+      state.filter = button.dataset.filter;
+      [...els.tabs.querySelectorAll(".tab")].forEach((tab) => tab.classList.toggle("active", tab === button));
+      renderSaved();
+    });
+
+    renderSaved();
+  </script>
+</body>
+</html>
