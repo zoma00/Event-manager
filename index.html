@@ -536,19 +536,20 @@
   <script>
     const CAIRO_TZ = "Africa/Cairo";
     const STORAGE_KEY = "cairo-event-manager.saved-events.v1";
-    const DEFAULT_SAMPLE = `Meeting Name: Woman Healing After Narcissistic Abuse
-Thursday, Jun 25 · 2:00 AM to 2:40 AM EEST
-Location: London
+    const DEFAULT_SAMPLE = `By
+[Tablon Global](https://www.eventbrite.com/e/join-biggest-community-investors-founders-online-tickets-1975086794771#organizer-card)
+4.7k followers
+160 events
+1y hosting
+1.7k total attendees
 
-Linkedin Tips for Job Seekers: Advice from a Tech Recruiter
+Following
+[CairoCairo, Cairo Governorate](https://www.eventbrite.com/e/join-biggest-community-investors-founders-online-tickets-1975086794771#location)
+Thursday, July 2  •  2 PM - 3 PM
+Overview
+Are you an Investor or a Founder? Raising funds & want to build connections with others? Yes? This community is for you!
 
-calendar icon
-Saturday, Jun 27 · 6:00 PM to 8:00 PM EEST
-
-video icon
-Online event
-
-Link visible for attendees`;
+Join the Biggest Community of Investors & Founders | ONLINE`;
 
     const monthMap = {
       jan: 1, january: 1, feb: 2, february: 2, mar: 3, march: 3,
@@ -583,6 +584,7 @@ Link visible for attendees`;
       "dc": "America/New_York",
       "sydney": "Australia/Sydney",
       "dubai": "Asia/Dubai",
+      "cairo governorate": "Africa/Cairo",
       "cairo": "Africa/Cairo",
       "egypt": "Africa/Cairo"
     };
@@ -692,6 +694,10 @@ Link visible for attendees`;
         const match = line.match(/^(?:source\s+)?(?:location|venue|address|city|place)\s*:\s*(.+)$/i);
         if (match) return match[1].trim();
       }
+      const markdownLocation = lines
+        .map((line) => line.match(/^\[([^\]]*(?:cairo|egypt|governorate)[^\]]*)\]\([^)]+#location\)$/i))
+        .find(Boolean);
+      if (markdownLocation) return markdownLocation[1].replace(/([A-Za-z]+)\1,/g, "$1,").trim();
       for (let index = 0; index < lines.length; index += 1) {
         if (/^(pin|location|map)\s+icon$/i.test(lines[index])) {
           for (const candidate of lines.slice(index + 1)) {
@@ -700,16 +706,22 @@ Link visible for attendees`;
         }
       }
       const cityState = lines.find((line) => /\b[A-Za-z .'-]+,\s*[A-Z]{2}\b/.test(line));
-      return cityState || "";
+      if (cityState) return cityState;
+      const knownLocation = lines.find((line) => resolveSourceZone(line.replace(/^\[|\]\([^)]+\)$/g, "")));
+      return knownLocation || "";
     }
 
     function isMetadataLine(line) {
       return /\b(calendar|time|video|location|map|pin)\s+icon\b/i.test(line) || /^link visible for attendees$/i.test(line);
     }
 
+    function isUiLabelLine(line) {
+      return /^(changed|date|time|new|old)$/i.test(line);
+    }
+
     function inferEventType(text) {
       const value = normalizeText(text).toLowerCase();
-      if (/\b(online event|virtual event|webinar|zoom|teams|google meet|video icon|link visible for attendees|livestream|live stream)\b/.test(value)) {
+      if (/\b(online|online event|virtual event|webinar|zoom|teams|google meet|video icon|link visible for attendees|livestream|live stream)\b/.test(value)) {
         return "online";
       }
       if (/\b(in-person|in person|venue|address|location|room|building|street|avenue|road|floor|map|postcode|zip code)\b/.test(value)) {
@@ -735,20 +747,27 @@ Link visible for attendees`;
       return match ? match[2].trim() : "";
     }
 
+    function isTitleCandidate(line) {
+      if (!line || isMetadataLine(line) || isUiLabelLine(line)) return false;
+      if (/^(by|following|overview|close|all day|does not repeat|guests|add guests|guest permissions|modify event|invite others|event end time zone)$/i.test(line)) return false;
+      if (/^\[[^\]]+\]\([^)]+\)$/.test(line)) return false;
+      if (/^\d+(?:\.\d+)?[ky]?\s+(?:followers|events|attendees|total attendees|hosting)$/i.test(line)) return false;
+      if (/^(?:to|-)$/.test(line) || /^\d{1,2}(?::\d{2})?\s*(?:AM|PM)?$/i.test(line)) return false;
+      if (lineHasTime(line) || parseDateQuiet(line) || extractExplicitGmtZone(line)) return false;
+      return true;
+    }
+
     function lineHasTime(line) {
       return Boolean(parseTimeRange(line) || parseSingleTime(line));
     }
 
     function firstUsefulTitleLine(text) {
-      const ignored = /^(close|all day|does not repeat|guests|add guests|guest permissions|modify event|invite others|event end time zone)$/i;
+      const candidates = [];
       for (const raw of text.split(/\r?\n/)) {
         const line = raw.trim();
-        if (!line || isMetadataLine(line) || ignored.test(line) || line.toLowerCase().includes("event end time zone")) continue;
-        if (/^(?:to|-)$/.test(line) || /^\d{1,2}(?::\d{2})?\s*(?:AM|PM)?$/i.test(line)) continue;
-        if (lineHasTime(line) || parseDateQuiet(line) || extractExplicitGmtZone(line)) continue;
-        return line.replace(/:$/, "");
+        if (isTitleCandidate(line)) candidates.push(line.replace(/:$/, ""));
       }
-      return "";
+      return candidates.find((line) => /\bonline\b/i.test(line)) || candidates[candidates.length - 1] || "";
     }
 
     function parseDate(text, defaultYear) {
@@ -764,7 +783,7 @@ Link visible for attendees`;
         return { year: Number(match[3] || defaultYear), month: monthMap[match[2].toLowerCase()], day: Number(match[1]) };
       }
 
-      match = clean.match(/\b(?:mon(?:day)?|tue(?:s|sday|day)?|tuseday|wed(?:nesday)?|thu(?:r|rs|rsday|rday|sday)?|thursday|fri(?:day)?|sat(?:urday)?|sun(?:day)?)?,?\s*([A-Za-z]+)\s+(\d{1,2})(?:st|nd|rd|th)?(?:,?\s*(\d{4}))?\b/i);
+      match = clean.match(/\b(?:mon(?:day)?|tue(?:s|sday|day)?|tuseday|wed(?:nesday)?|thu(?:r|rs|rsday|rday|sday)?|thursday|fri(?:day)?|sat(?:urday)?|sun(?:day)?)?,?\s*([A-Za-z]+)\s+(\d{1,2})(?:st|nd|rd|th)?(?:,?\s*(\d{4})(?:new)?)?\b/i);
       if (match && monthMap[match[1].toLowerCase()]) {
         return { year: Number(match[3] || defaultYear), month: monthMap[match[1].toLowerCase()], day: Number(match[2]) };
       }
@@ -927,10 +946,11 @@ Link visible for attendees`;
       const segments = [];
       let pendingName = "";
       let pendingLabel = "";
+      let pendingDate = "";
 
       lines.forEach((raw, index) => {
         const line = raw.trim();
-        if (!line || isMetadataLine(line)) return;
+        if (!line || isMetadataLine(line) || isUiLabelLine(line)) return;
         const explicitName = extractMeetingName(line);
         if (explicitName) {
           pendingName = explicitName;
@@ -943,15 +963,20 @@ Link visible for attendees`;
         if (lineHasTime(line)) {
           segments.push({
             label: pendingLabel,
-            name: pendingName,
-            line,
+            name: pendingName || firstUsefulTitleLine(text),
+            line: pendingDate ? `${pendingDate} ${line}` : line,
             eventType: followingType(lines, index)
           });
           pendingLabel = "";
           pendingName = "";
+          pendingDate = "";
           return;
         }
-        if (/[A-Za-z]/.test(line)) pendingName = line;
+        if (parseDateQuiet(line)) {
+          if (!pendingDate) pendingDate = line;
+          return;
+        }
+        if (/[A-Za-z]/.test(line) && isTitleCandidate(line)) pendingName = line;
       });
 
       if (!segments.length && lineHasTime(text)) {
@@ -997,7 +1022,7 @@ Link visible for attendees`;
           name: segment.name || `Event ${index + 1}`,
           sourceLocation: assertedText || "",
           sourceZoneLabel: previewZone.label,
-          eventType: segment.eventType,
+          eventType: segment.eventType === "unknown" ? inferEventType(text) : segment.eventType,
           sourceStart: formatSourceDate(startUtc, previewZone),
           sourceEnd: parsedTime.single ? "" : formatSourceDate(endUtc, previewZone),
           cairoStart: formatInZone(startUtc, CAIRO_TZ),
@@ -1234,6 +1259,7 @@ Link visible for attendees`;
       renderSaved();
     });
 
+    els.eventText.value = DEFAULT_SAMPLE;
     renderSaved();
   </script>
 </body>
