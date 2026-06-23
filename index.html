@@ -642,6 +642,18 @@ Join the Biggest Community of Investors & Founders | ONLINE`;
       return value.trim().toLowerCase().replace(/\./g, "").replace(/\s+/g, " ");
     }
 
+    function escapeRegex(value) {
+      return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    }
+
+    function hasLocationAlias(text, alias) {
+      const normalizedText = cleanLocationKey(text).replace(/,/g, "");
+      const normalizedAlias = cleanLocationKey(alias).replace(/,/g, "");
+      if (!normalizedText || !normalizedAlias) return false;
+      if (normalizedText === normalizedAlias) return true;
+      return new RegExp(`(?:^|\\b)${escapeRegex(normalizedAlias).replace(/\s+/g, "\\s+")}(?:\\b|$)`, "i").test(normalizedText);
+    }
+
     function isIanaTimeZone(value) {
       try {
         new Intl.DateTimeFormat("en-US", { timeZone: value }).format(new Date());
@@ -670,7 +682,8 @@ Join the Biggest Community of Investors & Founders | ONLINE`;
       }
       const key = cleanLocationKey(trimmed);
       const noComma = key.replace(/,/g, "");
-      const matchKey = locationZones[key] ? key : Object.keys(locationZones).find((candidate) => key.includes(candidate) || noComma.includes(candidate));
+      const exactKey = locationZones[key] ? key : (locationZones[noComma] ? noComma : "");
+      const matchKey = exactKey || Object.keys(locationZones).find((candidate) => hasLocationAlias(noComma, candidate));
       if (matchKey) {
         return { label: locationZones[matchKey], timeZone: locationZones[matchKey], fixedOffset: null, location: trimmed };
       }
@@ -707,7 +720,10 @@ Join the Biggest Community of Investors & Founders | ONLINE`;
       }
       const cityState = lines.find((line) => /\b[A-Za-z .'-]+,\s*[A-Z]{2}\b/.test(line));
       if (cityState) return cityState;
-      const knownLocation = lines.find((line) => resolveSourceZone(line.replace(/^\[|\]\([^)]+\)$/g, "")));
+      const knownLocation = lines.find((line) => {
+        const cleaned = line.replace(/^\[|\]\([^)]+\)$/g, "");
+        return Object.keys(locationZones).some((candidate) => hasLocationAlias(cleaned, candidate));
+      });
       return knownLocation || "";
     }
 
@@ -995,8 +1011,10 @@ Join the Biggest Community of Investors & Founders | ONLINE`;
       const defaultYear = Number(options.defaultYear || new Date().getFullYear());
       const detectedLocation = extractLocation(text);
       const explicitGmtZone = extractExplicitGmtZone(text);
-      const assertedText = options.sourceLocation || explicitGmtZone || detectedLocation;
-      const assertedZone = resolveSourceZone(assertedText);
+      const overrideText = (options.sourceLocation || "").trim();
+      const overrideZone = resolveSourceZone(overrideText);
+      const explicitTextZone = resolveSourceZone(explicitGmtZone);
+      const detectedZone = resolveSourceZone(detectedLocation);
       const segments = eventSegments(text);
       if (!segments.length) throw new Error("No event time found.");
 
@@ -1005,7 +1023,8 @@ Join the Biggest Community of Investors & Founders | ONLINE`;
         const parsedTime = parseTimeRange(segment.line) || parseSingleTime(segment.line);
         const startTime = parseHour(parsedTime.startHour, parsedTime.startMinute, parsedTime.startAmpm);
         const endTime = parseHour(parsedTime.endHour, parsedTime.endMinute, parsedTime.endAmpm || parsedTime.startAmpm);
-        const previewZone = assertedZone || sourceZoneFromMatchedLabel(parsedTime.zoneLabel);
+        const lineZone = sourceZoneFromMatchedLabel(parsedTime.zoneLabel);
+        const previewZone = overrideZone || explicitTextZone || lineZone || detectedZone;
         if (!previewZone) throw new Error("Source location/timezone assertion is required.");
 
         const startUtc = zonedTimeToUtc(dateParts, startTime, previewZone);
@@ -1020,7 +1039,7 @@ Join the Biggest Community of Investors & Founders | ONLINE`;
           id: "",
           index: index + 1,
           name: segment.name || `Event ${index + 1}`,
-          sourceLocation: assertedText || "",
+          sourceLocation: overrideText || detectedLocation || "",
           sourceZoneLabel: previewZone.label,
           eventType: segment.eventType === "unknown" ? inferEventType(text) : segment.eventType,
           sourceStart: formatSourceDate(startUtc, previewZone),
@@ -1259,7 +1278,11 @@ Join the Biggest Community of Investors & Founders | ONLINE`;
       renderSaved();
     });
 
-    els.eventText.value = DEFAULT_SAMPLE;
+    writeSaved([]);
+    els.eventText.value = "";
+    els.sourceLocation.value = "";
+    state.lastConverted = [];
+    renderResults([]);
     renderSaved();
   </script>
 </body>
