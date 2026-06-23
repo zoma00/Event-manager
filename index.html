@@ -247,6 +247,16 @@
       background: var(--danger);
     }
 
+    .btn-card-delete {
+      min-height: 30px;
+      padding: 0 10px;
+      border-radius: 7px;
+      color: white;
+      background: var(--danger);
+      font-size: 12px;
+      font-weight: 720;
+    }
+
     .notice {
       min-height: 44px;
       display: none;
@@ -308,6 +318,14 @@
       display: flex;
       flex-wrap: wrap;
       gap: 7px;
+    }
+
+    .card-actions {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 8px;
+      flex-wrap: wrap;
     }
 
     .badge {
@@ -766,8 +784,13 @@ Join the Biggest Community of Investors & Founders | ONLINE`;
     function isTitleCandidate(line) {
       if (!line || isMetadataLine(line) || isUiLabelLine(line)) return false;
       if (/^(by|following|overview|close|all day|does not repeat|guests|add guests|guest permissions|modify event|invite others|event end time zone)$/i.test(line)) return false;
+      if (/^(?:this is a )?(?:hybrid|online|virtual|in[- ]person) event$/i.test(line)) return false;
+      if (/^(?:hosted by|photo of)\b/i.test(line) || /\bsuper organizer\b/i.test(line)) return false;
+      if (/^needs a link$/i.test(line)) return false;
+      if (/^https?:\/\/\S+$/i.test(line)) return false;
       if (/^\[[^\]]+\]\([^)]+\)$/.test(line)) return false;
       if (/^\d+(?:\.\d+)?[ky]?\s+(?:followers|events|attendees|total attendees|hosting)$/i.test(line)) return false;
+      if (/^\d+(?:\.\d+)?\s+reviews$/i.test(line)) return false;
       if (/^(?:to|-)$/.test(line) || /^\d{1,2}(?::\d{2})?\s*(?:AM|PM)?$/i.test(line)) return false;
       if (lineHasTime(line) || parseDateQuiet(line) || extractExplicitGmtZone(line)) return false;
       return true;
@@ -783,7 +806,7 @@ Join the Biggest Community of Investors & Founders | ONLINE`;
         const line = raw.trim();
         if (isTitleCandidate(line)) candidates.push(line.replace(/:$/, ""));
       }
-      return candidates.find((line) => /\bonline\b/i.test(line)) || candidates[candidates.length - 1] || "";
+      return candidates[0] || "";
     }
 
     function parseDate(text, defaultYear) {
@@ -957,6 +980,13 @@ Join the Biggest Community of Investors & Founders | ONLINE`;
       return mins ? `UTC${sign}${hours}:${String(mins).padStart(2, "0")}` : `UTC${sign}${hours}`;
     }
 
+    function extractPrimaryLink(text) {
+      const markdownMatch = text.match(/\((https?:\/\/[^)\s]+)\)/i);
+      if (markdownMatch) return markdownMatch[1];
+      const plainMatch = text.match(/https?:\/\/\S+/i);
+      return plainMatch ? plainMatch[0].replace(/[),.;!?]+$/, "") : "";
+    }
+
     function eventSegments(text) {
       const lines = text.split(/\r?\n/);
       const segments = [];
@@ -992,7 +1022,7 @@ Join the Biggest Community of Investors & Founders | ONLINE`;
           if (!pendingDate) pendingDate = line;
           return;
         }
-        if (/[A-Za-z]/.test(line) && isTitleCandidate(line)) pendingName = line;
+        if (/[A-Za-z]/.test(line) && isTitleCandidate(line) && !pendingName) pendingName = line;
       });
 
       if (!segments.length && lineHasTime(text)) {
@@ -1011,6 +1041,7 @@ Join the Biggest Community of Investors & Founders | ONLINE`;
       const defaultYear = Number(options.defaultYear || new Date().getFullYear());
       const detectedLocation = extractLocation(text);
       const explicitGmtZone = extractExplicitGmtZone(text);
+      const sourceLink = extractPrimaryLink(text);
       const overrideText = (options.sourceLocation || "").trim();
       const overrideZone = resolveSourceZone(overrideText);
       const explicitTextZone = resolveSourceZone(explicitGmtZone);
@@ -1024,7 +1055,7 @@ Join the Biggest Community of Investors & Founders | ONLINE`;
         const startTime = parseHour(parsedTime.startHour, parsedTime.startMinute, parsedTime.startAmpm);
         const endTime = parseHour(parsedTime.endHour, parsedTime.endMinute, parsedTime.endAmpm || parsedTime.startAmpm);
         const lineZone = sourceZoneFromMatchedLabel(parsedTime.zoneLabel);
-        const previewZone = overrideZone || explicitTextZone || lineZone || detectedZone;
+        const previewZone = overrideZone || lineZone || explicitTextZone || detectedZone;
         if (!previewZone) throw new Error("Source location/timezone assertion is required.");
 
         const startUtc = zonedTimeToUtc(dateParts, startTime, previewZone);
@@ -1039,6 +1070,7 @@ Join the Biggest Community of Investors & Founders | ONLINE`;
           id: "",
           index: index + 1,
           name: segment.name || `Event ${index + 1}`,
+          sourceLink,
           sourceLocation: overrideText || detectedLocation || "",
           sourceZoneLabel: previewZone.label,
           eventType: segment.eventType === "unknown" ? inferEventType(text) : segment.eventType,
@@ -1090,14 +1122,18 @@ Join the Biggest Community of Investors & Founders | ONLINE`;
       return "badge";
     }
 
-    function renderEventCard(event) {
+    function renderEventCard(event, options = {}) {
+      const showDelete = Boolean(options.deletable);
       const sourceEnd = event.sourceEnd ? ` - ${event.sourceEnd}` : "";
       const cairoEnd = event.cairoEnd ? ` - ${event.cairoEnd}` : "";
       return `
-        <article class="event-card">
+        <article class="event-card" data-event-id="${escapeHtml(event.id)}">
           <header>
             <h3>${escapeHtml(event.name)}</h3>
-            <span class="${eventBadgeClass(event.eventType)}">${escapeHtml(event.eventType)}</span>
+            <div class="card-actions">
+              <span class="${eventBadgeClass(event.eventType)}">${escapeHtml(event.eventType)}</span>
+              ${showDelete ? '<button class="btn-card-delete" type="button" data-action="delete-saved">Delete</button>' : ""}
+            </div>
           </header>
           <div class="badge-row">
             <span class="badge">${escapeHtml(event.sourceZoneLabel)}</span>
@@ -1116,6 +1152,7 @@ Join the Biggest Community of Investors & Founders | ONLINE`;
             </div>
           </div>
           <div class="meta">${escapeHtml(offsetMessage(event.difference))}</div>
+          ${event.sourceLink ? `<div class="meta">Source link: <a href="${escapeHtml(event.sourceLink)}" target="_blank" rel="noopener noreferrer">${escapeHtml(event.sourceLink)}</a></div>` : ""}
           <div class="meta">Alexa reminder: ${escapeHtml(event.alexa)}</div>
         </article>
       `;
@@ -1156,12 +1193,20 @@ Join the Biggest Community of Investors & Founders | ONLINE`;
       return { savedCount: additions.length, duplicateCount: events.length - additions.length };
     }
 
+    function deleteSavedEvent(eventId) {
+      const saved = readSaved();
+      const nextSaved = saved.filter((event) => event.id !== eventId);
+      if (nextSaved.length === saved.length) return false;
+      writeSaved(nextSaved);
+      return true;
+    }
+
     function renderResults(events) {
       if (!events.length) {
         els.results.innerHTML = '<div class="empty">No conversion yet.</div>';
         return;
       }
-      els.results.innerHTML = events.map(renderEventCard).join("");
+      els.results.innerHTML = events.map((event) => renderEventCard(event)).join("");
     }
 
     function renderSaved() {
@@ -1171,7 +1216,7 @@ Join the Biggest Community of Investors & Founders | ONLINE`;
         els.savedList.innerHTML = '<div class="empty">No saved events in this view.</div>';
         return;
       }
-      els.savedList.innerHTML = visible.map(renderEventCard).join("");
+      els.savedList.innerHTML = visible.map((event) => renderEventCard(event, { deletable: true })).join("");
     }
 
     function formatEventForText(event, index) {
@@ -1181,6 +1226,7 @@ Join the Biggest Community of Investors & Founders | ONLINE`;
         `Event ${index + 1}: ${event.name}`,
         `Type: ${event.eventType}`,
         `Source timezone: ${event.sourceZoneLabel}`,
+        event.sourceLink ? `Source link: ${event.sourceLink}` : "",
         event.sourceLocation ? `Source assertion: ${event.sourceLocation}` : "",
         `Source: ${event.sourceStart}${sourceEnd}`,
         `Source offset: ${event.sourceOffset}`,
@@ -1207,6 +1253,16 @@ Join the Biggest Community of Investors & Founders | ONLINE`;
         "",
         events.map((event, index) => formatEventForText(event, index)).join("\n\n")
       ].join("\n");
+    }
+
+    function exportFileName(events) {
+      const baseTitle = String(events[0]?.name || "event")
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "_")
+        .replace(/^_+|_+$/g, "")
+        .slice(0, 80) || "event";
+      if (events.length === 1) return `${baseTitle}.txt`;
+      return `${baseTitle}_and_${events.length - 1}_more.txt`;
     }
 
     function runConversion(shouldSave) {
@@ -1242,7 +1298,7 @@ Join the Biggest Community of Investors & Founders | ONLINE`;
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      link.download = `cairo_event_times_${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "")}.txt`;
+      link.download = exportFileName(exportEvents);
       link.click();
       URL.revokeObjectURL(url);
       setMessage(`Exported ${exportEvents.length} event(s).`, "");
@@ -1276,6 +1332,15 @@ Join the Biggest Community of Investors & Founders | ONLINE`;
       state.filter = button.dataset.filter;
       [...els.tabs.querySelectorAll(".tab")].forEach((tab) => tab.classList.toggle("active", tab === button));
       renderSaved();
+    });
+    els.savedList.addEventListener("click", (event) => {
+      const button = event.target.closest('[data-action="delete-saved"]');
+      if (!button) return;
+      const card = button.closest("[data-event-id]");
+      const eventId = card?.dataset.eventId || "";
+      if (!eventId || !deleteSavedEvent(eventId)) return;
+      renderSaved();
+      setMessage("Saved event deleted.", "warn");
     });
 
     writeSaved([]);
