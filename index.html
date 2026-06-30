@@ -742,15 +742,99 @@ Join the Biggest Community of Investors & Founders | ONLINE`;
         const cleaned = line.replace(/^\[|\]\([^)]+\)$/g, "");
         return Object.keys(locationZones).some((candidate) => hasLocationAlias(cleaned, candidate));
       });
-      return knownLocation || "";
+      if (!knownLocation) return "";
+      const locationAlias = bestLocationAlias(knownLocation);
+      return locationAlias ? displayLocationAlias(locationAlias) : knownLocation;
     }
 
     function isMetadataLine(line) {
-      return /\b(calendar|time|video|location|map|pin)\s+icon\b/i.test(line) || /^link visible for attendees$/i.test(line);
+      return /\b(calendar|time|video|location|map|pin)\s+icon\b/i.test(line)
+        || /^[a-z0-9][a-z0-9 '&/+-]*\s+icon$/i.test(line)
+        || /^[a-z0-9][a-z0-9-]*-icon$/i.test(line)
+        || /^link visible for attendees$/i.test(line);
     }
 
     function isUiLabelLine(line) {
       return /^(changed|date|time|new|old)$/i.test(line);
+    }
+
+    function displayLocationAlias(alias) {
+      const key = cleanLocationKey(alias);
+      const specialLabels = {
+        "uk": "UK",
+        "dc": "DC",
+        "new york": "New York",
+        "los angeles": "Los Angeles",
+        "washington dc": "Washington DC",
+        "washington, dc": "Washington, DC",
+        "portland or": "Portland OR",
+        "portland, or": "Portland, OR",
+        "cairo governorate": "Cairo Governorate",
+        "united kingdom": "United Kingdom"
+      };
+      if (specialLabels[key]) return specialLabels[key];
+      return key.split(" ").map((part) => part ? part[0].toUpperCase() + part.slice(1) : part).join(" ");
+    }
+
+    function bestLocationAlias(text) {
+      const value = String(text || "");
+      const matches = Object.keys(locationZones)
+        .filter((candidate) => hasLocationAlias(value, candidate))
+        .sort((left, right) => right.length - left.length);
+      return matches[0] || "";
+    }
+
+    function bestLineSourceZone(line) {
+      const normalized = normalizeText(line);
+      const lineZone = sourceZoneFromMatchedLabel((parseTimeRange(normalized) || parseSingleTime(normalized) || {}).zoneLabel || "");
+      if (lineZone) return lineZone;
+
+      const explicitOffset = extractExplicitGmtZone(normalized);
+      if (explicitOffset) {
+        const explicitZone = resolveSourceZone(explicitOffset);
+        if (explicitZone) return explicitZone;
+      }
+
+      const bracketZone = normalized.match(/\(([A-Z]{2,5})\)/);
+      if (bracketZone) {
+        const fixedZone = resolveSourceZone(bracketZone[1]);
+        if (fixedZone) return fixedZone;
+      }
+
+      const alias = bestLocationAlias(normalized);
+      if (alias) return resolveSourceZone(alias);
+      return null;
+    }
+
+    function hasExplicitSourceHint(line) {
+      return Boolean(bestLineSourceZone(line));
+    }
+
+    function extractEmbeddedTitle(line) {
+      const clean = normalizeText(line).replace(/:$/, "");
+      const patterns = [
+        /^(.*?\S)\s+(?:mon(?:day)?|tue(?:s|sday|day)?|tuseday|wed(?:nesday)?|thu(?:r|rs|rsday|rday|sday)?|thursday|fri(?:day)?|sat(?:urday)?|sun(?:day)?)?,?\s*(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]+)(?:,?\s*(\d{4}))?$/i,
+        /^(.*?\S)\s+(?:mon(?:day)?|tue(?:s|sday|day)?|tuseday|wed(?:nesday)?|thu(?:r|rs|rsday|rday|sday)?|thursday|fri(?:day)?|sat(?:urday)?|sun(?:day)?)?,?\s*([A-Za-z]+)\s+(\d{1,2})(?:st|nd|rd|th)?(?:,?\s*(\d{4}))?$/i
+      ];
+      for (const pattern of patterns) {
+        const match = clean.match(pattern);
+        const title = match?.[1]?.trim().replace(/[,:-]+$/, "");
+        if (!title) continue;
+        const compact = cleanLocationKey(title).replace(/,/g, "");
+        if (!compact || weekdayMap[compact] !== undefined || monthMap[compact] !== undefined) continue;
+        if (/[A-Za-z]/.test(title)) return title;
+      }
+      return "";
+    }
+
+    function hasRicherUpcomingTimeLine(lines, index) {
+      for (const candidate of lines.slice(index + 1)) {
+        const line = candidate.trim();
+        if (!line) continue;
+        if (!lineHasTime(line)) continue;
+        return hasExplicitSourceHint(line);
+      }
+      return false;
     }
 
     function inferEventType(text) {
@@ -786,13 +870,16 @@ Join the Biggest Community of Investors & Founders | ONLINE`;
       if (/^(by|following|overview|close|all day|does not repeat|guests|add guests|guest permissions|modify event|invite others|event end time zone)$/i.test(line)) return false;
       if (/^(?:this is a )?(?:hybrid|online|virtual|in[- ]person) event$/i.test(line)) return false;
       if (/^(?:hosted by|photo of)\b/i.test(line) || /\bsuper organizer\b/i.test(line)) return false;
+      if (/^starts\s+in\s+\d+\s+(?:minute|minutes|hour|hours|day|days|week|weeks)\b/i.test(line)) return false;
       if (/^needs a link$/i.test(line)) return false;
       if (/^https?:\/\/\S+$/i.test(line)) return false;
       if (/^\[[^\]]+\]\([^)]+\)$/.test(line)) return false;
       if (/^\d+(?:\.\d+)?[ky]?\s+(?:followers|events|attendees|total attendees|hosting)$/i.test(line)) return false;
       if (/^\d+(?:\.\d+)?\s+reviews$/i.test(line)) return false;
       if (/^(?:to|-)$/.test(line) || /^\d{1,2}(?::\d{2})?\s*(?:AM|PM)?$/i.test(line)) return false;
-      if (lineHasTime(line) || parseDateQuiet(line) || extractExplicitGmtZone(line)) return false;
+      if (extractExplicitGmtZone(line)) return false;
+      if (lineHasTime(line)) return false;
+      if (parseDateQuiet(line) && !extractEmbeddedTitle(line)) return false;
       return true;
     }
 
@@ -804,6 +891,11 @@ Join the Biggest Community of Investors & Founders | ONLINE`;
       const candidates = [];
       for (const raw of text.split(/\r?\n/)) {
         const line = raw.trim();
+        const datedTitle = extractEmbeddedTitle(line);
+        if (datedTitle) {
+          candidates.push(datedTitle);
+          continue;
+        }
         if (isTitleCandidate(line)) candidates.push(line.replace(/:$/, ""));
       }
       return candidates[0] || "";
@@ -854,16 +946,43 @@ Join the Biggest Community of Investors & Founders | ONLINE`;
 
     function parseTimeRange(text) {
       const clean = normalizeText(text);
-      const match = clean.match(/(?<![\d-])(\d{1,2})(?::(\d{2}))?\s*(AM|PM)?\s*(?:-|to)\s*(\d{1,2})(?::(\d{2}))?\s*(AM|PM)?(?:\s*\(?([A-Za-z_]+\/[A-Za-z_]+|(?:UTC|GMT)\s*[+-]\s*\d{1,2}(?::?\d{2})?|[A-Z]{1,5})\)?)?(?=$|\s|[.,;:!?])/i);
-      if (!match) return null;
+      const zonePattern = String.raw`([A-Za-z_]+\/[A-Za-z_]+|(?:UTC|GMT)\s*[+-]\s*\d{1,2}(?::?\d{2})?|[A-Z]{1,5})`;
+      const minuteMatch = clean.match(new RegExp(String.raw`(?<![\d-])(\d{1,2})(?::(\d{2}))\s*(AM|PM)?\s*(?:-|to)\s*(\d{1,2})(?::(\d{2}))?\s*(AM|PM)?(?:\s*\(?${zonePattern}\)?)?(?=$|\s|[.,;:!?])`, "i"));
+      if (minuteMatch) {
+        return {
+          startHour: minuteMatch[1],
+          startMinute: minuteMatch[2] || "0",
+          startAmpm: minuteMatch[3] || minuteMatch[6] || "",
+          endHour: minuteMatch[4],
+          endMinute: minuteMatch[5] || "0",
+          endAmpm: minuteMatch[6] || "",
+          zoneLabel: minuteMatch[7] || ""
+        };
+      }
+
+      const ampmMatch = clean.match(new RegExp(String.raw`(?<![\d-])(\d{1,2})\s*(AM|PM)\s*(?:-|to)\s*(\d{1,2})(?::(\d{2}))?\s*(AM|PM)?(?:\s*\(?${zonePattern}\)?)?(?=$|\s|[.,;:!?])`, "i"));
+      if (ampmMatch) {
+        return {
+          startHour: ampmMatch[1],
+          startMinute: "0",
+          startAmpm: ampmMatch[2] || ampmMatch[5] || "",
+          endHour: ampmMatch[3],
+          endMinute: ampmMatch[4] || "0",
+          endAmpm: ampmMatch[5] || "",
+          zoneLabel: ampmMatch[6] || ""
+        };
+      }
+
+      const fallbackMatch = clean.match(new RegExp(String.raw`(?<![\d-])(\d{1,2})\s*(?:-|to)\s*(\d{1,2})(?::(\d{2}))?\s*(AM|PM)?(?:\s*\(?${zonePattern}\)?)?(?=$|\s|[.,;:!?])`, "i"));
+      if (!fallbackMatch) return null;
       return {
-        startHour: match[1],
-        startMinute: match[2] || "0",
-        startAmpm: match[3] || match[6] || "",
-        endHour: match[4],
-        endMinute: match[5] || "0",
-        endAmpm: match[6] || "",
-        zoneLabel: match[7] || ""
+        startHour: fallbackMatch[1],
+        startMinute: "0",
+        startAmpm: fallbackMatch[4] || "",
+        endHour: fallbackMatch[2],
+        endMinute: fallbackMatch[3] || "0",
+        endAmpm: fallbackMatch[4] || "",
+        zoneLabel: fallbackMatch[5] || ""
       };
     }
 
@@ -1007,6 +1126,7 @@ Join the Biggest Community of Investors & Founders | ONLINE`;
           return;
         }
         if (lineHasTime(line)) {
+          if (!hasExplicitSourceHint(line) && hasRicherUpcomingTimeLine(lines, index)) return;
           segments.push({
             label: pendingLabel,
             name: pendingName || firstUsefulTitleLine(text),
@@ -1019,6 +1139,8 @@ Join the Biggest Community of Investors & Founders | ONLINE`;
           return;
         }
         if (parseDateQuiet(line)) {
+          const datedTitle = extractEmbeddedTitle(line);
+          if (datedTitle && !pendingName) pendingName = datedTitle;
           if (!pendingDate) pendingDate = line;
           return;
         }
@@ -1054,7 +1176,7 @@ Join the Biggest Community of Investors & Founders | ONLINE`;
         const parsedTime = parseTimeRange(segment.line) || parseSingleTime(segment.line);
         const startTime = parseHour(parsedTime.startHour, parsedTime.startMinute, parsedTime.startAmpm);
         const endTime = parseHour(parsedTime.endHour, parsedTime.endMinute, parsedTime.endAmpm || parsedTime.startAmpm);
-        const lineZone = sourceZoneFromMatchedLabel(parsedTime.zoneLabel);
+        const lineZone = bestLineSourceZone(segment.line);
         const previewZone = overrideZone || lineZone || explicitTextZone || detectedZone;
         if (!previewZone) throw new Error("Source location/timezone assertion is required.");
 
@@ -1066,12 +1188,13 @@ Join the Biggest Community of Investors & Founders | ONLINE`;
         }
         const sourceOffset = previewZone.fixedOffset !== null ? previewZone.fixedOffset : getOffsetMinutes(previewZone.timeZone, startUtc);
         const cairoOffset = getOffsetMinutes(CAIRO_TZ, startUtc);
+        const lineLocationAlias = bestLocationAlias(segment.line);
         return {
           id: "",
           index: index + 1,
           name: segment.name || `Event ${index + 1}`,
           sourceLink,
-          sourceLocation: overrideText || detectedLocation || "",
+          sourceLocation: overrideText || (lineLocationAlias ? displayLocationAlias(lineLocationAlias) : "") || detectedLocation || "",
           sourceZoneLabel: previewZone.label,
           eventType: segment.eventType === "unknown" ? inferEventType(text) : segment.eventType,
           sourceStart: formatSourceDate(startUtc, previewZone),
