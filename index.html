@@ -870,6 +870,7 @@ Join the Biggest Community of Investors & Founders | ONLINE`;
       if (/^(by|following|overview|close|all day|does not repeat|guests|add guests|guest permissions|modify event|invite others|event end time zone)$/i.test(line)) return false;
       if (/^(?:this is a )?(?:hybrid|online|virtual|in[- ]person) event$/i.test(line)) return false;
       if (/^(?:hosted by|photo of)\b/i.test(line) || /\bsuper organizer\b/i.test(line)) return false;
+      if (/^(?:webinar id|topic|description|date & time|email received|event registration|order summary|ticket information|created by|first name|surname|email)\b/i.test(line)) return false;
       if (/^starts\s+in\s+\d+\s+(?:minute|minutes|hour|hours|day|days|week|weeks)\b/i.test(line)) return false;
       if (/^needs a link$/i.test(line)) return false;
       if (/^https?:\/\/\S+$/i.test(line)) return false;
@@ -885,6 +886,28 @@ Join the Biggest Community of Investors & Founders | ONLINE`;
 
     function lineHasTime(line) {
       return Boolean(parseTimeRange(line) || parseSingleTime(line));
+    }
+
+    function isNarrativeTimeLine(line) {
+      const clean = normalizeText(line);
+      if (!clean) return false;
+      if (/^[*-]\s/.test(clean)) return true;
+      if (/^(?:correct\??|based on this email)$/i.test(clean)) return true;
+      if (/^(?:if the event time is|so you should join|if this is from an event platform)\b/i.test(clean)) return true;
+      return /\balready converted the time to your local timezone\b/i.test(clean)
+        || /\bthen in\b.*\bthe time is\b/i.test(clean);
+    }
+
+    function hasConfirmationMarkers(text) {
+      const clean = normalizeText(text).toLowerCase();
+      return /\b(successfully registered|email received|your tickets|order confirmation|on your google calendar|google calendar|no-reply@zoom\.us|webinar id|outlook calendar|yahoo calendar|selected sessions|date & time)\b/.test(clean);
+    }
+
+    function isWeakEventName(value) {
+      const clean = normalizeText(value);
+      if (!clean) return true;
+      if (/^[✅⚠️🔥💡🎯🚀•*-]/u.test(clean)) return true;
+      return /^(?:google calendar|outlook calendar|yahoo calendar|zoom|attachments|join webinar|join via audio|more international numbers|webinar speakers|questions about this event|contact the organiser|go to my tickets|view event details|mobile|app store|google play|online|free|only me|stas)$/i.test(clean);
     }
 
     function firstUsefulTitleLine(text) {
@@ -1018,6 +1041,7 @@ Join the Biggest Community of Investors & Founders | ONLINE`;
       return { hour, minute };
     }
 
+
     function fixedOffsetFromLabel(label) {
       if (!label) return null;
       const compact = label.replace(/\s+/g, "").toUpperCase();
@@ -1132,6 +1156,8 @@ Join the Biggest Community of Investors & Founders | ONLINE`;
           return;
         }
         if (lineHasTime(line)) {
+          if (isNarrativeTimeLine(line) || isNarrativeTimeLine(pendingLabel)) return;
+          if (!pendingDate && !parseDateQuiet(line)) return;
           if (!hasExplicitSourceHint(line) && hasRicherUpcomingTimeLine(lines, index)) return;
           segments.push({
             label: pendingLabel,
@@ -1165,8 +1191,29 @@ Join the Biggest Community of Investors & Founders | ONLINE`;
       return segments;
     }
 
+    function candidateAuthorityScore(segment, lineZone) {
+      const context = normalizeText([segment.label, segment.name, segment.line].filter(Boolean).join(" "));
+      let score = 0;
+      if (lineZone?.timeZone) score += 50;
+      else if (lineZone?.fixedOffset !== null) score += 20;
+      if (/\b(zoom|google calendar|outlook calendar|yahoo calendar|confirmation|registered|registration|selected sessions|date & time|webinar id|your tickets|order confirmation|on your google calendar|no-reply@zoom\.us|email received)\b/i.test(context)) {
+        score += 40;
+      }
+      if (/\b(cairo|london)\b/i.test(segment.line)) score += 20;
+      if (!lineZone) score -= 10;
+      if (!parseSingleTime(segment.line)) score += 15;
+      if (isNarrativeTimeLine(segment.line) || isNarrativeTimeLine(segment.label)) score -= 100;
+      return score;
+    }
+
+    function cairoStartKey(date) {
+      const parts = getParts(date, CAIRO_TZ);
+      return `${parts.year}-${String(parts.month).padStart(2, "0")}-${String(parts.day).padStart(2, "0")}T${String(parts.hour).padStart(2, "0")}:${String(parts.minute).padStart(2, "0")}`;
+    }
+
     function convertText(text, options) {
       const defaultYear = Number(options.defaultYear || new Date().getFullYear());
+      const fallbackTitle = firstUsefulTitleLine(text);
       const detectedLocation = extractLocation(text);
       const explicitGmtZone = extractExplicitGmtZone(text);
       const sourceLink = extractPrimaryLink(text);
@@ -1175,46 +1222,134 @@ Join the Biggest Community of Investors & Founders | ONLINE`;
       const explicitTextZone = resolveSourceZone(explicitGmtZone);
       const detectedZone = resolveSourceZone(detectedLocation);
       const segments = eventSegments(text);
+      const confirmationMode = hasConfirmationMarkers(text);
       if (!segments.length) throw new Error("No event time found.");
 
-      return segments.map((segment, index) => {
-        const dateParts = parseDate(segment.line, defaultYear);
-        const parsedTime = parseTimeRange(segment.line) || parseSingleTime(segment.line);
-        const startTime = parseHour(parsedTime.startHour, parsedTime.startMinute, parsedTime.startAmpm);
-        const endTime = parseHour(parsedTime.endHour, parsedTime.endMinute, parsedTime.endAmpm || parsedTime.startAmpm);
-        const lineZone = bestLineSourceZone(segment.line);
-        const previewZone = overrideZone || lineZone || explicitTextZone || detectedZone;
-        if (!previewZone) throw new Error("Source location/timezone assertion is required.");
+      const parsedSegments = segments.map((segment, index) => {
+        try {
+          const dateParts = parseDate(segment.line, defaultYear);
+          const parsedTime = parseTimeRange(segment.line) || parseSingleTime(segment.line);
+          const startTime = parseHour(parsedTime.startHour, parsedTime.startMinute, parsedTime.startAmpm);
+          const endTime = parseHour(parsedTime.endHour, parsedTime.endMinute, parsedTime.endAmpm || parsedTime.startAmpm);
+          const lineZone = bestLineSourceZone(segment.line);
+          return {
+            segment,
+            index,
+            dateParts,
+            parsedTime,
+            startTime,
+            endTime,
+            lineZone,
+            score: candidateAuthorityScore(segment, lineZone),
+          };
+        } catch {
+          return null;
+        }
+      }).filter(Boolean);
 
-        const startUtc = zonedTimeToUtc(dateParts, startTime, previewZone);
-        let endUtc = zonedTimeToUtc(dateParts, endTime, previewZone);
-        if (!parsedTime.single && endUtc <= startUtc) {
-          const nextDate = new Date(Date.UTC(dateParts.year, dateParts.month - 1, dateParts.day + 1));
-          endUtc = zonedTimeToUtc({ year: nextDate.getUTCFullYear(), month: nextDate.getUTCMonth() + 1, day: nextDate.getUTCDate() }, endTime, previewZone);
+      if (!parsedSegments.length) throw new Error("No event time found.");
+
+      const authoritativeZone = confirmationMode
+        ? parsedSegments
+          .filter((candidate) => candidate.lineZone)
+          .sort((left, right) => {
+            const leftScore = left.score + (left.lineZone?.timeZone ? 20 : 0);
+            const rightScore = right.score + (right.lineZone?.timeZone ? 20 : 0);
+            return rightScore - leftScore || right.index - left.index;
+          })[0]?.lineZone || null
+        : null;
+
+      const candidates = parsedSegments.map((candidate) => {
+        const previewZone = overrideZone || candidate.lineZone || authoritativeZone || explicitTextZone || detectedZone;
+        if (!previewZone) return null;
+
+        const startUtc = zonedTimeToUtc(candidate.dateParts, candidate.startTime, previewZone);
+        let endUtc = zonedTimeToUtc(candidate.dateParts, candidate.endTime, previewZone);
+        if (!candidate.parsedTime.single && endUtc <= startUtc) {
+          const nextDate = new Date(Date.UTC(candidate.dateParts.year, candidate.dateParts.month - 1, candidate.dateParts.day + 1));
+          endUtc = zonedTimeToUtc({ year: nextDate.getUTCFullYear(), month: nextDate.getUTCMonth() + 1, day: nextDate.getUTCDate() }, candidate.endTime, previewZone);
         }
         const sourceOffset = previewZone.fixedOffset !== null ? previewZone.fixedOffset : getOffsetMinutes(previewZone.timeZone, startUtc);
         const cairoOffset = getOffsetMinutes(CAIRO_TZ, startUtc);
-        const lineLocationAlias = bestLocationAlias(segment.line);
+        const lineLocationAlias = bestLocationAlias(candidate.segment.line);
         return {
-          id: "",
-          index: index + 1,
-          name: segment.name || `Event ${index + 1}`,
-          sourceLink,
-          sourceLocation: overrideText || (lineLocationAlias ? displayLocationAlias(lineLocationAlias) : "") || detectedLocation || previewZone.location || "",
-          sourceZoneLabel: previewZone.label,
-          eventType: segment.eventType === "unknown" ? inferEventType(text) : segment.eventType,
-          sourceStart: formatSourceDate(startUtc, previewZone),
-          sourceEnd: parsedTime.single ? "" : formatSourceDate(endUtc, previewZone),
-          cairoStart: formatInZone(startUtc, CAIRO_TZ),
-          cairoEnd: parsedTime.single ? "" : formatInZone(endUtc, CAIRO_TZ),
-          alexa: `${formatInZone(startUtc, CAIRO_TZ).split(" at ")[0]} at ${new Intl.DateTimeFormat("en-US", { timeZone: CAIRO_TZ, hour: "numeric", minute: "2-digit", hour12: true }).format(startUtc)} Cairo time`,
-          sourceOffset: formatOffset(sourceOffset),
-          cairoOffset: formatOffset(cairoOffset),
-          difference: cairoOffset - sourceOffset,
-          originalLine: segment.line,
-          savedAt: new Date().toISOString()
+          score: candidate.score,
+          cairoKey: cairoStartKey(startUtc),
+          hasEnd: !candidate.parsedTime.single,
+          explicitZone: Boolean(candidate.lineZone),
+          segmentIndex: candidate.index,
+          event: {
+            id: "",
+            index: candidate.index + 1,
+            name: !isWeakEventName(candidate.segment.name) ? candidate.segment.name : (fallbackTitle || `Event ${candidate.index + 1}`),
+            sourceLink,
+            sourceLocation: overrideText || (lineLocationAlias ? displayLocationAlias(lineLocationAlias) : "") || detectedLocation || previewZone.location || "",
+            sourceZoneLabel: previewZone.label,
+            eventType: candidate.segment.eventType === "unknown" ? inferEventType(text) : candidate.segment.eventType,
+            sourceStart: formatSourceDate(startUtc, previewZone),
+            sourceEnd: candidate.parsedTime.single ? "" : formatSourceDate(endUtc, previewZone),
+            cairoStart: formatInZone(startUtc, CAIRO_TZ),
+            cairoEnd: candidate.parsedTime.single ? "" : formatInZone(endUtc, CAIRO_TZ),
+            alexa: `${formatInZone(startUtc, CAIRO_TZ).split(" at ")[0]} at ${new Intl.DateTimeFormat("en-US", { timeZone: CAIRO_TZ, hour: "numeric", minute: "2-digit", hour12: true }).format(startUtc)} Cairo time`,
+            sourceOffset: formatOffset(sourceOffset),
+            cairoOffset: formatOffset(cairoOffset),
+            difference: cairoOffset - sourceOffset,
+            originalLine: candidate.segment.line,
+            savedAt: new Date().toISOString()
+          }
         };
-      }).map((event) => ({ ...event, id: fingerprint(event) }));
+      }).filter(Boolean);
+
+      if (!candidates.length) throw new Error("No event time found.");
+
+      let selected = candidates;
+      if (confirmationMode) {
+        const groups = new Map();
+        candidates.forEach((candidate) => {
+          if (!groups.has(candidate.cairoKey)) groups.set(candidate.cairoKey, []);
+          groups.get(candidate.cairoKey).push(candidate);
+        });
+        const rankedGroups = Array.from(groups.values()).sort((left, right) => {
+          const leftScore = left.reduce((sum, candidate) => sum + Math.max(candidate.score, 0), 0);
+          const rightScore = right.reduce((sum, candidate) => sum + Math.max(candidate.score, 0), 0);
+          return rightScore - leftScore;
+        });
+        const bestGroup = rankedGroups[0] || [];
+        const bestCandidate = bestGroup.sort((left, right) => {
+          const leftScore = left.score + (left.hasEnd ? 15 : 0) + (left.explicitZone ? 10 : 0);
+          const rightScore = right.score + (right.hasEnd ? 15 : 0) + (right.explicitZone ? 10 : 0);
+          return rightScore - leftScore || right.segmentIndex - left.segmentIndex;
+        })[0];
+        if (bestCandidate) {
+          const merged = { ...bestCandidate, event: { ...bestCandidate.event } };
+          if (!merged.hasEnd) {
+            const rangeCandidate = bestGroup
+              .filter((candidate) => candidate.hasEnd)
+              .sort((left, right) => right.score - left.score || right.segmentIndex - left.segmentIndex)[0];
+            if (rangeCandidate) {
+              merged.hasEnd = true;
+              merged.event.sourceEnd = rangeCandidate.event.sourceEnd;
+              merged.event.cairoEnd = rangeCandidate.event.cairoEnd;
+            }
+          }
+          selected = [merged];
+        } else {
+          selected = candidates;
+        }
+      }
+
+      const unique = [];
+      const seen = new Set();
+      selected
+        .sort((left, right) => left.segmentIndex - right.segmentIndex)
+        .forEach((candidate) => {
+          const event = { ...candidate.event, id: fingerprint(candidate.event) };
+          if (seen.has(event.id)) return;
+          seen.add(event.id);
+          unique.push(event);
+        });
+
+      return unique.map((event, index) => ({ ...event, index: index + 1 }));
     }
 
     function fingerprint(event) {
