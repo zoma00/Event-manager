@@ -684,9 +684,6 @@ Join the Biggest Community of Investors & Founders | ONLINE`;
     function resolveSourceZone(value) {
       if (!value) return null;
       const trimmed = value.trim();
-      if (isIanaTimeZone(trimmed)) {
-        return { label: trimmed, timeZone: trimmed, fixedOffset: null, location: trimmed };
-      }
       const compactOffset = trimmed.replace(/\s+/g, "");
       const offsetMatch = compactOffset.match(/^(UTC|GMT)([+-])(\d{1,2})(?::?(\d{2}))?$/i);
       if (offsetMatch) {
@@ -697,6 +694,9 @@ Join the Biggest Community of Investors & Founders | ONLINE`;
       const fixed = fixedZones[trimmed.toUpperCase()];
       if (fixed !== undefined) {
         return { label: trimmed.toUpperCase(), timeZone: null, fixedOffset: fixed, location: trimmed };
+      }
+      if (isIanaTimeZone(trimmed)) {
+        return { label: trimmed, timeZone: trimmed, fixedOffset: null, location: trimmed };
       }
       const key = cleanLocationKey(trimmed);
       const noComma = key.replace(/,/g, "");
@@ -987,7 +987,13 @@ Join the Biggest Community of Investors & Founders | ONLINE`;
     }
 
     function parseSingleTime(text) {
-      const match = normalizeText(text).match(/\bat\s+(\d{1,2})(?::(\d{2}))?\s*(AM|PM)?(?:\s*\(?([A-Za-z_]+\/[A-Za-z_]+|[A-Z]{1,5}(?:\/[A-Z]{1,5})?|(?:UTC|GMT)\s*[+-]\s*\d{1,2}(?::?\d{2})?)\)?)?/i);
+      const clean = normalizeText(text);
+      if (parseTimeRange(clean)) return null;
+      const zonePattern = String.raw`([A-Za-z_]+\/[A-Za-z_]+|[A-Z]{1,5}(?:\/[A-Z]{1,5})?|(?:UTC|GMT)\s*[+-]\s*\d{1,2}(?::?\d{2})?)`;
+      let match = clean.match(new RegExp(String.raw`\bat\s+(\d{1,2})(?::(\d{2}))?\s*(AM|PM)?(?:\s*\(?${zonePattern}\)?)?`, "i"));
+      if (!match) {
+        match = clean.match(new RegExp(String.raw`(?<![\d-])(\d{1,2})(?::(\d{2}))?\s*(AM|PM)(?:\s*\(?${zonePattern}\)?)?(?=$|\s|[.,;:!?])`, "i"));
+      }
       if (!match) return null;
       return {
         startHour: match[1],
@@ -1026,9 +1032,9 @@ Join the Biggest Community of Investors & Founders | ONLINE`;
 
     function sourceZoneFromMatchedLabel(label) {
       if (!label) return null;
-      if (isIanaTimeZone(label)) return { label, timeZone: label, fixedOffset: null, location: "" };
       const fixed = fixedOffsetFromLabel(label);
       if (fixed) return { label: fixed.label, timeZone: null, fixedOffset: fixed.minutes, location: "" };
+      if (isIanaTimeZone(label)) return { label, timeZone: label, fixedOffset: null, location: "" };
       const first = label.split("/")[0];
       const fixedFirst = fixedOffsetFromLabel(first);
       if (fixedFirst) return { label: fixedFirst.label, timeZone: null, fixedOffset: fixedFirst.minutes, location: "" };
@@ -1194,7 +1200,7 @@ Join the Biggest Community of Investors & Founders | ONLINE`;
           index: index + 1,
           name: segment.name || `Event ${index + 1}`,
           sourceLink,
-          sourceLocation: overrideText || (lineLocationAlias ? displayLocationAlias(lineLocationAlias) : "") || detectedLocation || "",
+          sourceLocation: overrideText || (lineLocationAlias ? displayLocationAlias(lineLocationAlias) : "") || detectedLocation || previewZone.location || "",
           sourceZoneLabel: previewZone.label,
           eventType: segment.eventType === "unknown" ? inferEventType(text) : segment.eventType,
           sourceStart: formatSourceDate(startUtc, previewZone),
